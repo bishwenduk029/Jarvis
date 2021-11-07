@@ -11,15 +11,14 @@ from json import dump as json_dump
 from json import dumps as json_dumps
 from json import load as json_load
 from json import loads as json_loads
-from math import ceil, floor, log, pow
+from math import ceil
 from multiprocessing.context import TimeoutError as ThreadTimeoutError
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from platform import platform
 from random import choice, choices, randrange
-from re import IGNORECASE, findall, match, search, sub
-from shutil import disk_usage
-from socket import AF_INET, SOCK_DGRAM, gethostbyname, gethostname, socket
+from re import IGNORECASE, findall, match, search
+from socket import gethostbyname, gethostname
 from ssl import create_default_context
 from string import ascii_letters, digits, punctuation
 from struct import unpack_from
@@ -42,15 +41,13 @@ from geopy.distance import geodesic
 from geopy.exc import GeocoderUnavailable, GeopyError
 from geopy.geocoders import Nominatim, options
 from gmailconnector.send_email import SendEmail
-from gmailconnector.send_sms import Messenger
 from googlehomepush import GoogleHome
 from googlehomepush.http_server import serve_file
-from holidays import CountryHoliday
 from inflect import engine
 from joke.jokes import chucknorris, geek, icanhazdad, icndb
 from newsapi import NewsApiClient, newsapi_exception
 from playsound import playsound
-from psutil import Process, boot_time, cpu_count, virtual_memory
+from psutil import Process, boot_time
 from pvporcupine import KEYWORD_PATHS, LIBRARY_PATH, MODEL_PATH, create
 from pyaudio import PyAudio, paInt16
 from pychromecast.error import ChromecastConnectionError
@@ -65,22 +62,32 @@ from randfacts import getFact
 from requests import get, post
 from requests.auth import HTTPBasicAuth
 from requests.exceptions import ConnectionError
-from search_engine_parser.core.engines.google import Search as GoogleSearch
-from search_engine_parser.core.exceptions import NoResultsOrTrafficError
 from speech_recognition import (Microphone, Recognizer, RequestError,
                                 UnknownValueError, WaitTimeoutError)
-from speedtest import ConfigRetrievalError, Speedtest
 from timezonefinder import TimezoneFinder
 from wakeonlan import send_magic_packet as wake
 from wikipedia import exceptions as wiki_exceptions
 from wikipedia import summary
-from wolframalpha import Client as Think
-from wordninja import split as splitter
 from yaml import FullLoader
 from yaml import dump as yaml_dump
 from yaml import load as yaml_load
 
 from api.controller import offline_compatible
+from components.acknowledgement_words import ack
+from components.convert_bytes import size_converter
+from components.convert_time import time_converter
+from components.datatype_manipulators import (comma_separator, extract_nos,
+                                              extract_str, format_nos)
+from components.datetime_functionalities import part_of_day
+from components.events import celebrate
+from components.exit_functions import exit_message
+from components.externals import alpha, google, google_search
+from components.get_places import get_place_from_phrase
+from components.host_machine_info import system_info
+from components.internet_of_things import (get_ssid, internet_checker, ip_info,
+                                           vpn_checker)
+from components.notifier import notify
+from components.unrecognized import unrecognized_dumper
 from helper_functions.conversation import Conversation
 from helper_functions.database import Database, file_name
 from helper_functions.facial_recognition import Face
@@ -92,25 +99,8 @@ from helper_functions.preset_values import preset_values
 from helper_functions.robinhood import RobinhoodGatherer
 from helper_functions.temperature import Temperature
 from helper_functions.tv_controls import TV
-
-
-# noinspection PyProtectedMember,PyUnresolvedReferences
-def say(text: str = None, run: bool = False) -> None:
-    """Calls speaker.say to speak a statement from the received text.
-
-    Args:
-        text: Takes the text that has to be spoken as an argument.
-        run: Takes a boolean flag to choose whether or not to run the speaker.say loop.
-    """
-    if text:
-        speaker.say(text=text)
-        text = text.replace('\n', '\t').strip()
-        logger.info(f'Response: {text}')
-        logger.info(f'Speaker called by: {sys._getframe(1).f_code.co_name}')
-        sys.stdout.write(f"\r{text}")
-        text_spoken['text'] = text
-    if run:
-        speaker.runAndWait()
+from peripherals.audio_input import listener
+from peripherals.audio_output import say, voice_changer, voice_default
 
 
 def no_env_vars():
@@ -118,31 +108,6 @@ def no_env_vars():
     # noinspection PyProtectedMember,PyUnresolvedReferences
     logger.error(f'Called by: {sys._getframe(1).f_code.co_name}')
     say(text="I don't have permissions sir! Please add the necessary environment variables and ask me to restart!")
-
-
-def listener(timeout: int, phrase_limit: int, sound: bool = True) -> str:
-    """Function to activate listener, this function will be called by most upcoming functions to listen to user input.
-
-    Args:
-        timeout: Time in seconds for the overall listener to be active.
-        phrase_limit: Time in seconds for the listener to actively listen to a sound.
-        sound: Flag whether or not to play the listener indicator sound. Defaults to True unless set to False.
-
-    Returns:
-        str:
-         - On success, returns recognized statement from the microphone.
-         - On failure, returns ``SR_ERROR`` as a string which is conditioned to respond appropriately.
-    """
-    try:
-        sys.stdout.write("\rListener activated..") and playsound('indicators/start.mp3') if sound else \
-            sys.stdout.write("\rListener activated..")
-        listened = recognizer.listen(source, timeout=timeout, phrase_time_limit=phrase_limit)
-        sys.stdout.write("\r") and playsound('indicators/end.mp3') if sound else sys.stdout.write("\r")
-        return_val = recognizer.recognize_google(listened)
-        sys.stdout.write(f'\r{return_val}')
-    except (UnknownValueError, RequestError, WaitTimeoutError):
-        return_val = 'SR_ERROR'
-    return return_val
 
 
 def split(key: str, should_return: bool = False) -> bool:
@@ -166,26 +131,6 @@ def split(key: str, should_return: bool = False) -> bool:
     else:
         exit_check = conditions(converted=key.strip(), should_return=should_return)
     return exit_check
-
-
-def part_of_day() -> str:
-    """Checks the current hour to determine the part of day.
-
-    Returns:
-        str:
-        Morning, Afternoon, Evening or Night based on time of day.
-    """
-    am_pm = datetime.now().strftime("%p")
-    current_hour = int(datetime.now().strftime("%I"))
-    if current_hour in range(4, 12) and am_pm == 'AM':
-        greet = 'Morning'
-    elif am_pm == 'PM' and (current_hour == 12 or current_hour in range(1, 4)):
-        greet = 'Afternoon'
-    elif current_hour in range(4, 8) and am_pm == 'PM':
-        greet = 'Evening'
-    else:
-        greet = 'Night'
-    return greet
 
 
 def initialize() -> None:
@@ -222,32 +167,6 @@ def renew() -> None:
             say(run=True)
         except (UnknownValueError, RequestError, WaitTimeoutError):
             pass
-
-
-def time_converter(seconds: float) -> str:
-    """Modifies seconds to appropriate days/hours/minutes/seconds.
-
-    Args:
-        seconds: Takes number of seconds as argument.
-
-    Returns:
-        str:
-        Seconds converted to days or hours or minutes or seconds.
-    """
-    days = round(seconds // 86400)
-    seconds = round(seconds % (24 * 3600))
-    hours = round(seconds // 3600)
-    seconds %= 3600
-    minutes = round(seconds // 60)
-    seconds %= 60
-    if days:
-        return f'{days} days, {hours} hours, {minutes} minutes, and {seconds} seconds'
-    elif hours:
-        return f'{hours} hours, {minutes} minutes, and {seconds} seconds'
-    elif minutes:
-        return f'{minutes} minutes, and {seconds} seconds'
-    elif seconds:
-        return f'{seconds} seconds'
 
 
 def conditions(converted: str, should_return: bool = False) -> bool:
@@ -482,73 +401,6 @@ def conditions(converted: str, should_return: bool = False) -> bool:
                     search_query = str(converted).replace(' ', '+')
                     unknown_url = f"https://www.google.com/search?q={search_query}"
                     web_open(unknown_url)
-
-
-def get_place_from_phrase(phrase: str) -> str:
-    """Looks for the name of a place in the phrase received.
-
-    Args:
-        phrase: Takes the phrase converted as an argument.
-
-    Returns:
-        str:
-        Returns the name of place if skimmed.
-    """
-    place = ''
-    for word in phrase.split():
-        if word[0].isupper():
-            place += word + ' '
-        elif '.' in word:
-            place += word + ' '
-    if place:
-        return place
-
-
-def ip_info(phrase: str) -> None:
-    """Gets IP address of the host machine.
-
-    Args:
-        phrase: Takes the spoken phrase an an argument and tells the public IP if requested.
-    """
-    if 'public' in phrase.lower():
-        if not internet_checker():
-            say(text="You are not connected to the internet sir!")
-            return
-        if ssid := get_ssid():
-            ssid = f'for the connection {ssid} '
-        else:
-            ssid = ''
-        if public_ip := json_load(urlopen('https://ipinfo.io/json')).get('ip'):
-            output = f"My public IP {ssid}is {public_ip}"
-        elif public_ip := json_loads(urlopen('http://ip.jsontest.com').read()).get('ip'):
-            output = f"My public IP {ssid}is {public_ip}"
-        else:
-            output = 'I was unable to fetch the public IP sir!'
-    else:
-        ip_address = vpn_checker().split(':')[-1]
-        output = f"My local IP address for {gethostname()} is {ip_address}"
-    say(text=output)
-
-
-def unrecognized_dumper(converted: str) -> None:
-    """If none of the conditions are met, converted text is written to a yaml file.
-
-    Args:
-        converted: Takes the voice recognized statement as argument.
-    """
-    train_file = {'Uncategorized': converted}
-    if os.path.isfile('training_data.yaml'):
-        content = open(r'training_data.yaml', 'r').read()
-        for key, value in train_file.items():
-            if str(value) not in content:  # avoids duplication in yaml file
-                dict_file = [{key: [value]}]
-                with open(r'training_data.yaml', 'a') as writer:
-                    yaml_dump(dict_file, writer)
-    else:
-        for key, value in train_file.items():
-            train_file = [{key: [value]}]
-        with open(r'training_data.yaml', 'w') as writer:
-            yaml_dump(train_file, writer)
 
 
 # noinspection PyUnresolvedReferences,PyProtectedMember
@@ -902,23 +754,6 @@ def weather_condition(msg: str, place: str = None) -> None:
     say(text=output)
 
 
-def system_info() -> None:
-    """Gets the system configuration."""
-    total, used, free = disk_usage("/")
-    total = size_converter(total)
-    used = size_converter(used)
-    free = size_converter(free)
-    ram = size_converter(virtual_memory().total).replace('.0', '')
-    ram_used = size_converter(virtual_memory().percent).replace(' B', ' %')
-    physical = cpu_count(logical=False)
-    logical = cpu_count(logical=True)
-    o_system = platform().split('.')[0]
-    sys_config = f"You're running {o_system}, with {physical} physical cores and {logical} logical cores. " \
-                 f"Your physical drive capacity is {total}. You have used up {used} of space. Your free space is " \
-                 f"{free}. Your RAM capacity is {ram}. You are currently utilizing {ram_used} of your memory."
-    say(text=sys_config)
-
-
 def wikipedia_() -> None:
     """Gets any information from wikipedia using it's API."""
     say(text="Please tell the keyword.", run=True)
@@ -1247,7 +1082,7 @@ def flip_a_coin() -> None:
 
 def facts() -> None:
     """Tells a random fact."""
-    say(text=getFact(False))
+    say(text=getFact(filter=True))
 
 
 def meaning(phrase: str) -> None:
@@ -1438,7 +1273,7 @@ def delete_db() -> None:
             return
 
 
-def distance(phrase):
+def distance(phrase: str):
     """Extracts the start and end location to get the distance for it.
 
     Args:
@@ -1748,19 +1583,6 @@ def kill_alarm() -> None:
             say(text=f"Your alarm at {hour}:{minute} {am_pm} has been silenced sir!")
         else:
             say(text=f"I wasn't able to find an alarm at {hour}:{minute} {am_pm}. Try again.")
-
-
-def comma_separator(list_: list) -> str:
-    """Separates commas using simple ``.join()`` function and analysis based on length of the list taken as argument.
-
-    Args:
-        list_: Takes a list of elements as an argument.
-
-    Returns:
-        str:
-        Comma separated list of elements.
-    """
-    return ', and '.join([', '.join(list_[:-1]), list_[-1]] if len(list_) > 2 else list_)
 
 
 def google_home(device: str = None, file: str = None) -> None:
@@ -2079,32 +1901,6 @@ def github_controller(target: list) -> None:
         say(text=f"I found {len(target)} repositories sir! You may want to be more specific.")
 
 
-def notify(user: str, password: str, number: str, body: str, subject: str = None) -> None:
-    """Send text message through SMS gateway of destination number.
-
-    References:
-        Uses `gmail-connector <https://pypi.org/project/gmail-connector/>`__ to send the SMS.
-
-    Args:
-        user: Gmail username to authenticate SMTP lib.
-        password: Gmail password to authenticate SMTP lib.
-        number: Phone number stored as env var.
-        body: Content of the message.
-        subject: Takes subject as an optional argument.
-    """
-    if not any([phone_number, number]):
-        logger.error('No phone number was stored in env vars to trigger a notification.')
-        return
-    if not subject:
-        subject = "Message from Jarvis" if number == phone_number else "Jarvis::Message from Vignesh"
-    response = Messenger(gmail_user=user, gmail_pass=password, phone_number=number, subject=subject,
-                         message=body).send_sms()
-    if response.get('ok') and response.get('status') == 200:
-        logger.info('SMS notification has been sent.')
-    else:
-        logger.error(f'Unable to send SMS notification.\n{response}')
-
-
 def send_sms(phrase: str = None) -> None:
     """Sends a message to the number received.
 
@@ -2267,136 +2063,6 @@ def television(phrase: str) -> None:
     else:
         phrase = phrase.replace('my', 'your').replace('please', '').replace('will you', '').strip()
         say(text=f"I'm sorry sir! I wasn't able to {phrase}, as the TV state is unknown!")
-
-
-def alpha(text: str) -> bool:
-    """Uses wolfram alpha API to fetch results for uncategorized phrases heard.
-
-    Args:
-        text: Takes the voice recognized statement as argument.
-
-    Raises:
-        Broad ``Exception`` clause indicating that the Full Results API did not find an input parameter while parsing.
-
-    Returns:
-        bool:
-        Boolean True if wolfram alpha API is unable to fetch consumable results.
-
-    References:
-        `Error 1000 <https://products.wolframalpha.com/show-steps-api/documentation/#:~:text=(Error%201000)>`__
-    """
-    if not think_id:
-        return False
-    alpha_client = Think(app_id=think_id)
-    # noinspection PyBroadException
-    try:
-        res = alpha_client.query(text)
-    except Exception:
-        return True
-    if res['@success'] == 'false':
-        return True
-    else:
-        try:
-            response = next(res.results).text.splitlines()[0]
-            response = sub(r'(([0-9]+) \|)', '', response).replace(' |', ':').strip()
-            if response == '(no data available)':
-                return True
-            say(text=response)
-        except (StopIteration, AttributeError):
-            return True
-
-
-def google(query: str, suggestion_count: int = 0) -> bool:
-    """Uses Google's search engine parser and gets the first result that shows up on a google search.
-
-    Notes:
-        - If it is unable to get the result, Jarvis sends a request to ``suggestqueries.google.com``
-        - This is to rephrase the query and then looks up using the search engine parser once again.
-        - ``suggestion_count`` is used to limit the number of times suggestions are used.
-        - ``suggestion_count`` is also used to make sure the suggestions and parsing don't run on an infinite loop.
-        - This happens when ``google`` gets the exact search as suggested ones which failed to fetch results earlier.
-
-    Args:
-        suggestion_count: Integer value that keeps incrementing when ``Jarvis`` looks up for suggestions.
-        query: Takes the voice recognized statement as argument.
-
-    Returns:
-        bool:
-        Boolean ``True`` if google search engine is unable to fetch consumable results.
-    """
-    search_engine = GoogleSearch()
-    results = []
-    try:
-        google_results = search_engine.search(query, cache=False)
-        a = {"Google": google_results}
-        results = [result['titles'] for k, v in a.items() for result in v]
-    except NoResultsOrTrafficError:
-        suggest_url = "https://suggestqueries.google.com/complete/search"
-        params = {
-            "client": "firefox",
-            "q": query,
-        }
-        r = get(suggest_url, params)
-        if not r:
-            return True
-        try:
-            suggestion = r.json()[1][1]
-            suggestion_count += 1
-            if suggestion_count >= 3:  # avoids infinite suggestions over the same suggestion
-                say(text=r.json()[1][0].replace('=', ''), run=True)  # picks the closest match and opens a google search
-                return False
-            else:
-                google(suggestion, suggestion_count)
-        except IndexError:
-            return True
-    if results:
-        [results.remove(result) for result in results if len(result.split()) < 3]  # removes results with dummy words
-    else:
-        return False
-    if results:
-        results = results[0:3]  # picks top 3 (first appeared on Google)
-        results.sort(key=lambda x: len(x.split()), reverse=True)  # sorts in reverse by the word count of each sentence
-        output = results[0]  # picks the top most result
-        if '\n' in output:
-            required = output.split('\n')
-            modify = required[0].strip()
-            split_val = ' '.join(splitter(modify.replace('.', 'rEpLaCInG')))
-            sentence = split_val.replace(' rEpLaCInG ', '.')
-            repeats = []
-            [repeats.append(word) for word in sentence.split() if word not in repeats]
-            refined = ' '.join(repeats)
-            output = refined + required[1] + '.' + required[2]
-        output = output.replace('\\', ' or ')
-        match_word = search(r'(\w{3},|\w{3}) (\d,|\d|\d{2},|\d{2}) \d{4}', output)
-        if match_word:
-            output = output.replace(match_word.group(), '')
-        output = output.replace('\\', ' or ')
-        say(text=output, run=True)
-        return False
-    else:
-        return True
-
-
-def google_search(phrase: str = None) -> None:
-    """Opens up a google search for the phrase received. If nothing was received, gets phrase from user.
-
-    Args:
-        phrase: Takes the phrase spoken as an argument.
-    """
-    phrase = phrase.split('for')[-1] if 'for' in phrase else None
-    if not phrase:
-        say(text="Please tell me the search phrase.", run=True)
-        converted = listener(timeout=3, phrase_limit=5)
-        if converted == 'SR_ERROR':
-            return
-        elif 'exit' in converted or 'quit' in converted or 'xzibit' in converted or 'cancel' in converted:
-            return
-        else:
-            phrase = converted.lower()
-    search_query = str(phrase).replace(' ', '+')
-    unknown_url = f"https://www.google.com/search?q={search_query}"
-    web_open(unknown_url)
-    say(text=f"I've opened up a google search for: {phrase}.")
 
 
 def volume(phrase: str = None, level: int = None) -> None:
@@ -2747,46 +2413,6 @@ def lights(phrase: str) -> None:
         say(text=f"I didn't quite get that sir! What do you want me to do to your {plural}?")
 
 
-def vpn_checker() -> str:
-    """Uses simple check on network id to see if it is connected to local host or not.
-
-    Returns:
-        str:
-        Private IP address of host machine.
-    """
-    socket_ = socket(AF_INET, SOCK_DGRAM)
-    socket_.connect(("8.8.8.8", 80))
-    ip_address = socket_.getsockname()[0]
-    socket_.close()
-    if not (ip_address.startswith('192') | ip_address.startswith('127')):
-        ip_address = 'VPN:' + ip_address
-        info = json_load(urlopen('https://ipinfo.io/json'))
-        sys.stdout.write(f"\rVPN connection is detected to {info.get('ip')} at {info.get('city')}, "
-                         f"{info.get('region')} maintained by {info.get('org')}")
-        say(text="You have your VPN turned on. Details on your screen sir! Please note that none of the home "
-                 "integrations will work with VPN enabled.")
-    return ip_address
-
-
-def celebrate() -> str:
-    """Function to look if the current date is a holiday or a birthday.
-
-    Returns:
-        str:
-        A string of the event observed today.
-    """
-    day = datetime.today().date()
-    today = datetime.now().strftime("%d-%B")
-    us_holidays = CountryHoliday('US').get(day)  # checks if the current date is a US holiday
-    in_holidays = CountryHoliday('IND', prov='TN', state='TN').get(day)  # checks if Indian (esp TN) holiday
-    if in_holidays:
-        return in_holidays
-    elif us_holidays and 'Observed' not in us_holidays:
-        return us_holidays
-    elif birthday and today == birthday:
-        return 'Birthday'
-
-
 def time_travel() -> None:
     """Triggered only from ``initiator()`` to give a quick update on the user's daily routine."""
     part_day = part_of_day()
@@ -2999,7 +2625,7 @@ def offline_communicator(command: str = None, respond: bool = True) -> None:
             os.environ['called_by_offline'] = '1'  # Write env var so some function can use it
             split(command)
             del os.environ['called_by_offline']  # deletes the env var
-            response = text_spoken.get('text')
+            response = os.environ.get('text_spoken')
         else:
             response = 'Received a null request. Please resend it.'
         if 'restart' not in command and respond:
@@ -3180,24 +2806,6 @@ def system_vitals() -> None:
             if any(word in response.lower() for word in keywords.ok):
                 logger.info(f'JARVIS::Restarting {hosted_device.get("device")}')
                 restart(target='PC_Proceed')
-
-
-def get_ssid() -> str:
-    """Gets SSID of the network connected.
-
-    Returns:
-        str:
-        WiFi or Ethernet SSID.
-    """
-    process = Popen(
-        ['/System/Library/PrivateFrameworks/Apple80211.framework/Versions/Current/Resources/airport', '-I'],
-        stdout=PIPE)
-    out, err = process.communicate()
-    if error := process.returncode:
-        logger.error(f"Failed to fetch SSID with exit code: {error}\n{err}")
-    # noinspection PyTypeChecker
-    return dict(map(str.strip, info.split(': ')) for info in out.decode('utf-8').splitlines()[:-1] if
-                len(info.split()) == 2).get('SSID')
 
 
 def personal_cloud(phrase: str) -> None:
@@ -3396,20 +3004,6 @@ def vpn_server_switch(operation: str) -> None:
     """
     base_script = f'cd {home}/vpn-server && git pull --quiet && source venv/bin/activate && export ENV=Jarvis'
     os.system(f'{base_script} && python vpn.py {operation} && exit')
-
-
-def internet_checker() -> Union[Speedtest, bool]:
-    """Uses speed test api to check for internet connection.
-
-    Returns:
-        ``Speedtest`` or bool:
-        - On success, returns Speedtest module.
-        - On failure, returns boolean False.
-    """
-    try:
-        return Speedtest()
-    except ConfigRetrievalError:
-        return False
 
 
 def morning() -> None:
@@ -3737,60 +3331,6 @@ class Activator:
         self.py_audio.terminate()
 
 
-def size_converter(byte_size: int) -> str:
-    """Gets the current memory consumed and converts it to human friendly format.
-
-    Args:
-        byte_size: Receives byte size as argument.
-
-    Returns:
-        str:
-        Converted understandable size.
-    """
-    if not byte_size:
-        from resource import RUSAGE_SELF, getrusage
-        byte_size = getrusage(RUSAGE_SELF).ru_maxrss
-    size_name = ("B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB")
-    integer = int(floor(log(byte_size, 1024)))
-    power = pow(1024, integer)
-    size = round(byte_size / power, 2)
-    return f'{size} {size_name[integer]}'
-
-
-def exit_message() -> str:
-    """Variety of exit messages based on day of week and time of day.
-
-    Returns:
-        str:
-        A greeting bye message.
-    """
-    am_pm = datetime.now().strftime("%p")  # current part of day (AM/PM)
-    hour = datetime.now().strftime("%I")  # current hour
-    day = datetime.now().strftime("%A")  # current day
-
-    if am_pm == 'AM' and int(hour) < 10:
-        exit_msg = f"Have a nice day, and happy {day}."
-    elif am_pm == 'AM' and int(hour) >= 10:
-        exit_msg = f"Enjoy your {day}."
-    elif am_pm == 'PM' and (int(hour) == 12 or int(hour) < 3) and day in weekend:
-        exit_msg = "Have a nice afternoon, and enjoy your weekend."
-    elif am_pm == 'PM' and (int(hour) == 12 or int(hour) < 3):
-        exit_msg = "Have a nice afternoon."
-    elif am_pm == 'PM' and int(hour) < 6 and day in weekend:
-        exit_msg = "Have a nice evening, and enjoy your weekend."
-    elif am_pm == 'PM' and int(hour) < 6:
-        exit_msg = "Have a nice evening."
-    elif day in weekend:
-        exit_msg = "Have a nice night, and enjoy your weekend."
-    else:
-        exit_msg = "Have a nice night."
-
-    if event := celebrate():
-        exit_msg += f'\nAnd by the way, happy {event}'
-
-    return exit_msg
-
-
 def terminator() -> None:
     """Exits the process with specified status without calling cleanup handlers, flushing stdio buffers, etc.
 
@@ -3856,45 +3396,6 @@ def exit_process() -> None:
     remove_files()
     sys.stdout.write(f"\rMemory consumed: {size_converter(0)}"
                      f"\nTotal runtime: {time_converter(perf_counter())}")
-
-
-def extract_nos(input_: str) -> float:
-    """Extracts number part from a string.
-
-    Args:
-        input_: Takes string as an argument.
-
-    Returns:
-        float:
-        Float values.
-    """
-    return float('.'.join(findall(r"\d+", input_)))
-
-
-def format_nos(input_: float) -> int:
-    """Removes ``.0`` float values.
-
-    Args:
-        input_: Int if found, else returns the received float value.
-
-    Returns:
-        int:
-        Formatted integer.
-    """
-    return int(input_) if isinstance(input_, float) and input_.is_integer() else input_
-
-
-def extract_str(input_: str) -> str:
-    """Extracts strings from the received input.
-
-    Args:
-        input_: Takes a string as argument.
-
-    Returns:
-        str:
-        A string after removing special characters.
-    """
-    return ''.join([i for i in input_ if not i.isdigit() and i not in [',', '.', '?', '-', ';', '!', ':']]).strip()
 
 
 def hosted_device_info() -> dict:
@@ -4045,57 +3546,6 @@ def shutdown(proceed: bool = False) -> None:
             return
 
 
-# noinspection PyTypeChecker,PyUnresolvedReferences
-def voice_default(voice_model: str = 'Daniel') -> None:
-    """Sets voice module to default.
-
-    Args:
-        voice_model: Defaults to ``Daniel`` in mac.
-    """
-    voices = speaker.getProperty("voices")  # gets the list of voices available
-    for ind_d, voice_d in enumerate(voices):
-        if voice_d.name == voice_model:
-            sys.stdout.write(f'\rVoice module has been re-configured to {ind_d}::{voice_d.name}')
-            speaker.setProperty("voice", voices[ind_d].id)
-            return
-
-
-# noinspection PyTypeChecker,PyUnresolvedReferences
-def voice_changer(phrase: str = None) -> None:
-    """Speaks to the user with available voices and prompts the user to choose one.
-
-    Args:
-        phrase: Initiates changing voices with the model name. If none, defaults to ``Daniel``
-    """
-    if not phrase:
-        voice_default()
-        return
-
-    voices = speaker.getProperty("voices")  # gets the list of voices available
-    choices_to_say = ['My voice module has been reconfigured. Would you like me to retain this?',
-                      "Here's an example of one of my other voices. Would you like me to use this one?",
-                      'How about this one?']
-
-    for ind, voice in enumerate(voices):
-        speaker.setProperty("voice", voices[ind].id)
-        say(text=f'I am {voice.name} sir!')
-        sys.stdout.write(f'\rVoice module has been re-configured to {ind}::{voice.name}')
-        say(text=choices_to_say[ind]) if ind < len(choices_to_say) else say(text=choice(choices_to_say))
-        say(run=True)
-        keyword = listener(timeout=3, phrase_limit=3)
-        if keyword == 'SR_ERROR':
-            voice_default()
-            say(text="Sorry sir! I had trouble understanding. I'm back to my default voice.")
-            return
-        elif 'exit' in keyword or 'quit' in keyword or 'Xzibit' in keyword:
-            voice_default()
-            say(text='Reverting the changes to default voice module sir!')
-            return
-        elif any(word in keyword.lower() for word in keywords.ok):
-            say(text=choice(ack))
-            return
-
-
 def clear_logs() -> None:
     """Deletes log files that were updated before 48 hours."""
     [os.remove(f"logs/{file}") for file in os.listdir('logs')
@@ -4232,7 +3682,7 @@ if __name__ == '__main__':
     # warm_light is initiated with an empty dict and the key status is set to True when requested to switch to yellow
     # greet_check is used in initialize() to greet only for the first run
     # tv is set to an empty dict instead of TV() at the start to avoid turning on the TV unnecessarily
-    tv, warm_light, greet_check, text_spoken, STOPPER = None, {}, {}, {'text': ''}, {}
+    tv, warm_light, greet_check, STOPPER = None, {}, {}, {}
 
     # stores necessary values for geo location to receive the latitude, longitude and address
     options.default_ssl_context = create_default_context(cafile=where())
@@ -4262,10 +3712,6 @@ if __name__ == '__main__':
     wake_up3 = ["I'm here sir!"]
 
     confirmation = ['Requesting confirmation sir! Did you mean', 'Sir, are you sure you want to']
-    ack = ['Check', 'Will do sir!', 'You got it sir!', 'Roger that!', 'Done sir!', 'By all means sir!', 'Indeed sir!',
-           'Gladly sir!', 'Without fail sir!', 'Sure sir!', 'Buttoned up sir!', 'Executed sir!']
-
-    weekend = ['Friday', 'Saturday']
 
     # {function_name}.has_been_called is use to denote which function has triggered the other
     report.has_been_called, locate_places.has_been_called, directions.has_been_called, google_maps.has_been_called, \

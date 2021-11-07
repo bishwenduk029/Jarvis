@@ -66,8 +66,10 @@ app.add_middleware(
 
 zone = None
 if path.isfile('../location.yaml'):
-    location_details = load(open('../location.yaml'), Loader=FullLoader)
+    with open('../location.yaml') as location_file:
+        location_details = load(stream=location_file, Loader=FullLoader)
     zone = timezone(location_details.get('timezone'))
+    logger.info(f'Timezone: {zone}')
 
 
 def get_jarvis_status() -> bool:
@@ -206,7 +208,6 @@ def jarvis_offline_communicator(input_data: GetData):
         raise HTTPException(status_code=200,
                             detail='Restarting now sir! I will be up and running momentarily.')
     while True:
-        # todo: Consider async functions and await instead of hard-coded sleepers
         if path.isfile('../offline_response'):
             sleep(0.1)  # Read file after 0.1 second for the content to be written
             with open('../offline_response', 'r') as off_response:
